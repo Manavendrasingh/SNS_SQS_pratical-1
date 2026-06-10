@@ -65,6 +65,14 @@ ensure_bucket() {
       '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 }
 
+resolve_account_id() {
+  if ! aws sts get-caller-identity --query Account --output text; then
+    echo "AWS credentials are invalid. In CircleCI, check AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and AWS_REGION/AWS_DEFAULT_REGION." >&2
+    echo "If you are using long-lived IAM user keys, remove AWS_SESSION_TOKEN from CircleCI unless it belongs to the same active session." >&2
+    exit 1
+  fi
+}
+
 require_file "${TEMPLATE_FILE}"
 require_file "${PRODUCER_ZIP}"
 require_file "${CONSUMER_ZIP}"
@@ -79,8 +87,10 @@ if [[ -z "${AWS_REGION}" ]]; then
   exit 1
 fi
 
-AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-LAMBDA_CODE_BUCKET="${LAMBDA_CODE_BUCKET:-${PROJECT_NAME}-lambda-code-${AWS_ACCOUNT_ID}-${AWS_REGION}}"
+if [[ -z "${LAMBDA_CODE_BUCKET:-}" ]]; then
+  AWS_ACCOUNT_ID="$(resolve_account_id)"
+  LAMBDA_CODE_BUCKET="${PROJECT_NAME}-lambda-code-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+fi
 
 ensure_bucket "${LAMBDA_CODE_BUCKET}" "${AWS_REGION}"
 
