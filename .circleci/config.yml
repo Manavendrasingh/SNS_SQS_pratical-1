@@ -75,4 +75,4 @@ workflows:
             - package-lambdas
           filters:
             branches:
-              only: main
+              only: master
