@@ -12,15 +12,6 @@ PRODUCER_CODE_KEY="${PRODUCER_CODE_KEY:-producer.zip}"
 CONSUMER_CODE_KEY="${CONSUMER_CODE_KEY:-consumer.zip}"
 LOG_RETENTION_IN_DAYS="${LOG_RETENTION_IN_DAYS:-14}"
 
-require_env() {
-  local name="$1"
-
-  if [[ -z "${!name:-}" ]]; then
-    echo "Missing required environment variable: ${name}" >&2
-    exit 1
-  fi
-}
-
 require_file() {
   local path="$1"
 
@@ -30,10 +21,68 @@ require_file() {
   fi
 }
 
-require_env LAMBDA_CODE_BUCKET
+resolve_region() {
+  if [[ -n "${AWS_REGION:-}" ]]; then
+    echo "${AWS_REGION}"
+    return
+  fi
+
+  if [[ -n "${AWS_DEFAULT_REGION:-}" ]]; then
+    echo "${AWS_DEFAULT_REGION}"
+    return
+  fi
+
+  aws configure get region || true
+}
+
+ensure_bucket() {
+  local bucket="$1"
+  local region="$2"
+
+  if aws s3api head-bucket --bucket "${bucket}" >/dev/null 2>&1; then
+    echo "Using existing S3 bucket: ${bucket}"
+    return
+  fi
+
+  echo "Creating S3 bucket: ${bucket}"
+
+  if [[ "${region}" == "us-east-1" ]]; then
+    aws s3api create-bucket --bucket "${bucket}"
+  else
+    aws s3api create-bucket \
+      --bucket "${bucket}" \
+      --create-bucket-configuration LocationConstraint="${region}"
+  fi
+
+  aws s3api put-public-access-block \
+    --bucket "${bucket}" \
+    --public-access-block-configuration \
+      BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+  aws s3api put-bucket-encryption \
+    --bucket "${bucket}" \
+    --server-side-encryption-configuration \
+      '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+}
+
 require_file "${TEMPLATE_FILE}"
 require_file "${PRODUCER_ZIP}"
 require_file "${CONSUMER_ZIP}"
+
+AWS_REGION="$(resolve_region)"
+AWS_REGION="${AWS_REGION:-us-east-1}"
+export AWS_REGION
+export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-${AWS_REGION}}"
+
+if [[ -z "${AWS_REGION}" ]]; then
+  echo "Missing AWS region. Set AWS_REGION or AWS_DEFAULT_REGION." >&2
+  exit 1
+fi
+
+AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+LAMBDA_CODE_BUCKET="${LAMBDA_CODE_BUCKET:-${PROJECT_NAME}-lambda-code-${AWS_ACCOUNT_ID}-${AWS_REGION}}"
+
+ensure_bucket "${LAMBDA_CODE_BUCKET}" "${AWS_REGION}"
 
 echo "Uploading Lambda packages to s3://${LAMBDA_CODE_BUCKET}"
 aws s3 cp "${PRODUCER_ZIP}" "s3://${LAMBDA_CODE_BUCKET}/${PRODUCER_CODE_KEY}"
