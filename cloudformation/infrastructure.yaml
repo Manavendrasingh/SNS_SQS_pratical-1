@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SNS to SQS application with producer and consumer Lambda functions.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: sns-sqs-project
+    Description: Prefix used for named AWS resources.
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket that contains producer.zip and consumer.zip.
+  ProducerCodeKey:
+    Type: String
+    Default: producer.zip
+    Description: S3 object key for the producer Lambda deployment package.
+  ConsumerCodeKey:
+    Type: String
+    Default: consumer.zip
+    Description: S3 object key for the consumer Lambda deployment package.
+  LogRetentionInDays:
+    Type: Number
+    Default: 14
+    Description: Number of days to retain Lambda CloudWatch logs.
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+      - 400
+      - 545
+      - 731
+      - 1096
+      - 1827
+      - 2192
+      - 2557
+      - 2922
+      - 3288
+      - 3653
+
+Resources:
+  MessageTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-topic'
+
+  MessageDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-dlq'
+      MessageRetentionPeriod: 1209600
+
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-queue'
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MessageDeadLetterQueue.Arn
+        maxReceiveCount: 5
+
+  MessageQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MessageQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt MessageQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref MessageTopic
+
+  TopicSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: MessageQueuePolicy
+    Properties:
+      TopicArn: !Ref MessageTopic
+      Protocol: sqs
+      Endpoint: !GetAtt MessageQueue.Arn
+
+  ProducerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-producer'
+      RetentionInDays: !Ref LogRetentionInDays
+
+  ConsumerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-consumer'
+      RetentionInDays: !Ref LogRetentionInDays
+
+  ProducerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-producer-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${ProjectName}-producer-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref MessageTopic
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${ProducerLogGroup.Arn}:*'
+
+  ConsumerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-consumer-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${ProjectName}-consumer-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource: !GetAtt MessageQueue.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${ConsumerLogGroup.Arn}:*'
+
+  ProducerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ProducerLogGroup
+    Properties:
+      FunctionName: !Sub '${ProjectName}-producer'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ProducerExecutionRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref MessageTopic
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ProducerCodeKey
+
+  ConsumerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ConsumerLogGroup
+    Properties:
+      FunctionName: !Sub '${ProjectName}-consumer'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ConsumerExecutionRole.Arn
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ConsumerCodeKey
+
+  ConsumerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Ref ConsumerFunction
+      EventSourceArn: !GetAtt MessageQueue.Arn
+      BatchSize: 10
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+Outputs:
+  TopicArn:
+    Description: SNS topic ARN.
+    Value: !Ref MessageTopic
+  QueueUrl:
+    Description: SQS queue URL.
+    Value: !Ref MessageQueue
+  QueueArn:
+    Description: SQS queue ARN.
+    Value: !GetAtt MessageQueue.Arn
+  DeadLetterQueueUrl:
+    Description: Dead-letter queue URL.
+    Value: !Ref MessageDeadLetterQueue
+  DeadLetterQueueArn:
+    Description: Dead-letter queue ARN.
+    Value: !GetAtt MessageDeadLetterQueue.Arn
+  ProducerFunctionName:
+    Description: Producer Lambda function name.
+    Value: !Ref ProducerFunction
+  ConsumerFunctionName:
+    Description: Consumer Lambda function name.
+    Value: !Ref ConsumerFunction

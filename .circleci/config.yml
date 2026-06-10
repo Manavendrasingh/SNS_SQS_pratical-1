@@ -1,0 +1,74 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@5.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - npm-v1-{{ checksum "package-lock.json" }}
+            - npm-v1-
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - save_cache:
+          key: npm-v1-{{ checksum "package-lock.json" }}
+          paths:
+            - ~/.npm
+      - run:
+          name: Run tests
+          command: npm test
+      - run:
+          name: Build Nest app
+          command: npm run build
+
+  package-lambdas:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+      - run:
+          name: Package Lambda functions
+          command: |
+            mkdir -p artifacts
+            cd lambda/producer
+            npm install --omit=dev --no-package-lock
+            zip -r ../../artifacts/producer.zip .
+            cd ../consumer
+            zip -r ../../artifacts/consumer.zip .
+      - persist_to_workspace:
+          root: artifacts
+          paths:
+            - producer.zip
+            - consumer.zip
+
+  deploy:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+      - attach_workspace:
+          at: artifacts
+      - aws-cli/setup
+      - run:
+          name: Deploy AWS resources
+          command: bash scripts/deploy.sh
+
+workflows:
+  build-and-deploy:
+    jobs:
+      - test
+      - package-lambdas:
+          requires:
+            - test
+      - deploy:
+          requires:
+            - package-lambdas
+          filters:
+            branches:
+              only: main
