@@ -1,10 +1,23 @@
 {
   "name": "sns-sqs-project",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
   "private": true,
+  "description": "<p align=\"center\">   <a href=\"http://nestjs.com/\" target=\"blank\"><img src=\"https://nestjs.com/img/logo-small.svg\" width=\"120\" alt=\"Nest Logo\" /></a> </p>",
+  "homepage": "https://github.com/Manavendrasingh/SNS_SQS_pratical-1#readme",
+  "bugs": {
+    "url": "https://github.com/Manavendrasingh/SNS_SQS_pratical-1/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Manavendrasingh/SNS_SQS_pratical-1.git"
+  },
   "license": "UNLICENSED",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
