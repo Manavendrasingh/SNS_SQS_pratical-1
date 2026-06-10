@@ -21,17 +21,20 @@ jobs:
           paths:
             - ~/.npm
       - run:
-          name: Run tests
-          command: npm test
-      - run:
           name: Build Nest app
           command: npm run build
+
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
 
   package-lambdas:
     docker:
       - image: cimg/node:20.18
     steps:
-      - checkout
+      - attach_workspace:
+          at: .
       - run:
           name: Package Lambda functions
           command: |
