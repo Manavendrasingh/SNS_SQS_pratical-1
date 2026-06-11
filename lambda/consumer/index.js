@@ -11,11 +11,6 @@ exports.handler = async (event = {}) => {
       body: message,
     });
   }
-  let i = 0;
-  while(i>=0){
-      i++;
-      console.log('Processing message:', i);
-  }
 
   return {
     batchItemFailures: [],

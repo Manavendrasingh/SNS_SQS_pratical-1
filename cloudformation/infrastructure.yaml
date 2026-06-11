@@ -196,6 +196,20 @@ Resources:
       FunctionResponseTypes:
         - ReportBatchItemFailures
 
+  ProducerFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref ProducerFunction
+      AuthType: NONE
+
+  ProducerFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProducerFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE       
+
 Outputs:
   TopicArn:
     Description: SNS topic ARN.
@@ -218,3 +232,6 @@ Outputs:
   ConsumerFunctionName:
     Description: Consumer Lambda function name.
     Value: !Ref ConsumerFunction
+  ProducerFunctionUrl:
+    Description: Public Function URL for load testing producer Lambda.
+    Value: !GetAtt ProducerFunctionUrl.FunctionUrl  
